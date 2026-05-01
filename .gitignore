@@ -1,0 +1,8 @@
+# Compiled binaries
+caddy-hosttech
+*.exe
+# Build artefacts
+build/
+# IDE
+.idea/
+.vscode/
