@@ -129,7 +129,7 @@ func (r *apiRecord) toLibdns() libdns.Record {
 			TTL:          time.Duration(r.TTL) * time.Second,
 			Flags:        r.flags,
 			Tag:          r.Tag,
-			Value:        r.Name,
+			Value:        r.Value,
 			ProviderData: r.ID,
 		}
 	case recordTypePTR, recordTypeTLSA:
@@ -154,98 +154,59 @@ func (r *apiRecord) toLibdns() libdns.Record {
 }
 
 // fromLibdns creates a hosttech API record from a libdns.Record.
-func fromLibdns(rec libdns.Record, zone string) apiRecord {
+func fromLibdns(rec libdns.Record) (apiRecord, error) {
+	if nilRecord(rec) {
+		return apiRecord{}, inputError{field: "record"}
+	}
 	rr := rec.RR()
-	r := apiRecord{
-		Type: rr.Type,
-		TTL:  clampTTL(rr.TTL),
+	parsed, err := parseInput(rr)
+	if err != nil {
+		return apiRecord{}, err
 	}
-
-	if id, ok := getProviderID(rec); ok {
-		r.ID = id
+	r := apiRecord{Type: rr.Type, TTL: clampTTL(rr.TTL), Name: rr.Name}
+	if err := mapParsedRecord(&r, parsed); err != nil {
+		return apiRecord{}, err
 	}
+	normalizeWrite(&r)
+	return r, nil
+}
 
-	switch v := rec.(type) {
+func mapParsedRecord(r *apiRecord, parsed libdns.Record) error {
+	switch v := parsed.(type) {
 	case libdns.Address:
-		r.Name = v.Name
 		if v.IP.Is4() {
-			r.Type = recordTypeA
 			r.IPv4 = v.IP.String()
 		} else {
-			r.Type = recordTypeAAAA
 			r.IPv6 = v.IP.String()
 		}
 	case libdns.CNAME:
-		r.Name = v.Name
 		r.CName = v.Target
 	case libdns.MX:
-		r.OwnerName = v.Name
-		r.Name = v.Target
-		r.Pref = v.Preference
+		r.OwnerName, r.Name, r.Pref = v.Name, v.Target, v.Preference
 	case libdns.NS:
-		r.OwnerName = v.Name
-		r.TargetName = v.Target
+		r.OwnerName, r.TargetName = v.Name, v.Target
 	case libdns.TXT:
-		r.Name = v.Name
 		r.Text = v.Text
 	case libdns.SRV:
-		r.Service = v.RR().Name
-		r.Priority = v.Priority
-		r.Weight = v.Weight
-		r.Port = v.Port
-		r.Target = v.Target
+		r.Service, r.Name = v.RR().Name, ""
+		r.Priority, r.Weight, r.Port, r.Target = v.Priority, v.Weight, v.Port, v.Target
 	case libdns.CAA:
-		r.Name = v.Name
-		r.Flag = strconv.Itoa(int(v.Flags))
-		r.Tag = v.Tag
+		r.Flag, r.Tag, r.Value = strconv.Itoa(int(v.Flags)), v.Tag, v.Value
 	case libdns.RR:
-		r.Name = v.Name
-		switch v.Type {
-		case recordTypePTR:
-			r.Origin = v.Name
-			r.Name = v.Data
-		case recordTypeTLSA:
-			r.Text = v.Data
-		default:
+		if v.Type == recordTypePTR {
+			r.Origin, r.Name = v.Name, v.Data
+		} else {
 			r.Text = v.Data
 		}
-	}
-
-	normalizeWrite(&r)
-	return r
-}
-
-// providerData returns the ProviderData field from a typed libdns.Record, if present.
-func providerData(rec libdns.Record) any {
-	switch v := rec.(type) {
-	case libdns.Address:
-		return v.ProviderData
-	case libdns.CNAME:
-		return v.ProviderData
-	case libdns.MX:
-		return v.ProviderData
-	case libdns.NS:
-		return v.ProviderData
-	case libdns.TXT:
-		return v.ProviderData
-	case libdns.SRV:
-		return v.ProviderData
-	case libdns.CAA:
-		return v.ProviderData
 	default:
-		return nil
+		return inputError{typ: r.Type, field: fieldData}
 	}
-}
-
-// getProviderID extracts the hosttech record ID from a libdns.Record's ProviderData.
-func getProviderID(rec libdns.Record) (int, bool) {
-	id, ok := providerData(rec).(int)
-	return id, ok
+	return nil
 }
 
 // clampTTL ensures the TTL is at least 600 seconds (hosttech API minimum).
 func clampTTL(ttl time.Duration) int {
-	seconds := int(ttl.Seconds())
+	seconds := int(ttl / time.Second)
 	if seconds < 600 {
 		return 600
 	}
@@ -287,8 +248,8 @@ func normalizeName(n string) string {
 // while Name is mandatory. Type-specific value comparison is performed by
 // re-canonicalising want via fromLibdns so both sides go through the same
 // transform, avoiding representation drift.
-func matchesRR(apiRec apiRecord, want libdns.RR, zone string) bool {
-	if normalizeName(recordName(&apiRec)) != normalizeName(want.Name) {
+func matchesRR(apiRec *apiRecord, want libdns.RR) bool {
+	if normalizeName(recordName(apiRec)) != normalizeName(want.Name) {
 		return false
 	}
 	if want.Type != "" && apiRec.Type != want.Type {
@@ -300,8 +261,11 @@ func matchesRR(apiRec apiRecord, want libdns.RR, zone string) bool {
 	if want.Data == "" {
 		return true
 	}
-	parsed, _ := want.Parse()
-	return sameValue(apiRec, fromLibdns(parsed, zone))
+	mapped, err := fromLibdns(want)
+	if err != nil {
+		return false
+	}
+	return sameValue(*apiRec, mapped)
 }
 
 // sameValue compares the type-specific value fields of two apiRecords.

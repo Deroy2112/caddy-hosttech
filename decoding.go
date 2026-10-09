@@ -29,7 +29,7 @@ func (r *apiResponse[T]) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("decoding response envelope: %w", err)
 	}
 	if len(envelope.Data) == 0 || bytes.Equal(envelope.Data, []byte("null")) {
-		return responseError{kind: "response", field: "data"}
+		return responseError{kind: "response", field: fieldData}
 	}
 	if err := json.Unmarshal(envelope.Data, &r.Data); err != nil {
 		return fmt.Errorf("decoding response data: %w", err)
@@ -82,7 +82,7 @@ func (r *apiRecord) validate() error {
 		r.flags = uint8(flags)
 	case recordTypeCNAME, recordTypeMX, recordTypeNS, recordTypePTR, recordTypeSRV, recordTypeTXT, recordTypeTLSA:
 	default:
-		return responseError{kind: responseKindRecord, id: r.ID, field: "type"}
+		return responseError{kind: responseKindRecord, id: r.ID, field: fieldType}
 	}
 	return nil
 }

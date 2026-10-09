@@ -5,6 +5,7 @@ package hosttech
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -49,6 +50,11 @@ var fakeRecordFields = map[string][]string{
 	"TLSA":  {"name", "text"},
 }
 
+type fakeCall struct {
+	method, path string
+	body         fakeObject
+}
+
 type hosttechFake struct {
 	t        *testing.T
 	server   *httptest.Server
@@ -57,6 +63,7 @@ type hosttechFake struct {
 	records  map[string][]fakeObject
 	nextID   int
 	response func(int, fakeObject) fakeObject
+	calls    []fakeCall
 }
 
 func newHosttechFake(t *testing.T) *hosttechFake {
@@ -85,7 +92,7 @@ func (f *hosttechFake) provider(t *testing.T) *Provider {
 	}
 	p := &Provider{APIToken: fakeToken}
 	p.initClient()
-	p.client.httpClient.Transport = fakeTransport{target: target, transport: http.DefaultTransport}
+	p.client.httpClient.Transport = fakeTransport{target: target, transport: f.server.Client().Transport}
 	return p
 }
 
@@ -107,6 +114,7 @@ func (tr fakeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 func (f *hosttechFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.calls = append(f.calls, fakeCall{method: r.Method, path: r.URL.RequestURI()})
 	if r.Header.Get("Authorization") != "Bearer "+fakeToken {
 		f.reply(w, http.StatusUnauthorized, fakeObject{"message": "Unauthenticated."})
 		return
@@ -210,10 +218,11 @@ func (f *hosttechFake) writeRecord(w http.ResponseWriter, r *http.Request, zone 
 		f.reply(w, http.StatusBadRequest, fakeObject{"message": "Invalid JSON"})
 		return
 	}
+	f.calls[len(f.calls)-1].body = maps.Clone(body)
 	if r.Method == http.MethodPut {
 		body["type"] = f.records[zone][index]["type"]
 	}
-	if errs := fakeValidation(body); len(errs) > 0 {
+	if errs := fakeValidation(body, f.records[zone]); len(errs) > 0 {
 		f.reply(w, http.StatusUnprocessableEntity, fakeObject{"message": "The given data was invalid.", "errors": errs})
 		return
 	}
@@ -225,6 +234,11 @@ func (f *hosttechFake) writeRecord(w http.ResponseWriter, r *http.Request, zone 
 		}
 	}
 	owner := fakeRecordFields[typ][0]
+	if r.Method == http.MethodPut && typ == "CNAME" {
+		if _, present := body[owner]; !present {
+			rec[owner] = f.records[zone][index][owner]
+		}
+	}
 	if value, present := rec[owner]; !present || value == "" {
 		rec[owner] = nil
 	}
@@ -239,7 +253,7 @@ func (f *hosttechFake) writeRecord(w http.ResponseWriter, r *http.Request, zone 
 	f.reply(w, http.StatusCreated, fakeObject{"data": rec})
 }
 
-func fakeValidation(body fakeObject) map[string][]string {
+func fakeValidation(body fakeObject, records []fakeObject) map[string][]string {
 	errs := make(map[string][]string)
 	ttl, present := body["ttl"].(float64)
 	if !present {
@@ -266,6 +280,19 @@ func fakeValidation(body fakeObject) map[string][]string {
 			errs["name"] = []string{"Kein gültiger Domainname.", "is not valid"}
 		}
 	case "CNAME":
+		if name, present := body["name"].(string); present {
+			for _, record := range records {
+				fields := fakeRecordFields[fmt.Sprint(record["type"])]
+				if len(fields) == 0 {
+					continue
+				}
+				owner := record[fields[0]]
+				if owner == name || (name == "" && owner == nil) {
+					errs["name"] = []string{"CNAME Name muss innerhalb einer Zone einmalig sein. Auch kein Record eines anderen Typs darf denselben Namen haben."}
+					break
+				}
+			}
+		}
 		if target, ok := body["cname"].(string); ok && strings.HasSuffix(target, ".") {
 			errs["cname"] = []string{"Kein gültiger Domainname."}
 		}

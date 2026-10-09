@@ -3,6 +3,18 @@
 package hosttech
 
 func recordBody(r *apiRecord, create bool) (map[string]any, error) {
+	body, err := recordFields(r, create)
+	if err != nil {
+		return nil, err
+	}
+	body["ttl"] = r.TTL
+	if create {
+		body[fieldType] = r.Type
+	}
+	return body, nil
+}
+
+func recordFields(r *apiRecord, create bool) (map[string]any, error) {
 	var body map[string]any
 	switch r.Type {
 	case recordTypeA:
@@ -12,7 +24,10 @@ func recordBody(r *apiRecord, create bool) (map[string]any, error) {
 	case recordTypeCAA:
 		body = map[string]any{fieldName: r.Name, "flag": r.Flag, "tag": r.Tag, "value": r.Value}
 	case recordTypeCNAME:
-		body = map[string]any{fieldName: r.Name, "cname": r.CName}
+		body = map[string]any{"cname": r.CName}
+		if create {
+			body[fieldName] = r.Name
+		}
 	case recordTypeMX:
 		body = map[string]any{"ownername": r.OwnerName, fieldName: r.Name, "pref": r.Pref}
 	case recordTypeNS:
@@ -26,11 +41,7 @@ func recordBody(r *apiRecord, create bool) (map[string]any, error) {
 	case recordTypeTXT, recordTypeTLSA:
 		body = map[string]any{fieldName: r.Name, "text": r.Text}
 	default:
-		return nil, inputError{typ: r.Type, field: "type"}
-	}
-	body["ttl"] = r.TTL
-	if create {
-		body["type"] = r.Type
+		return nil, inputError{typ: r.Type, field: fieldType}
 	}
 	return body, nil
 }

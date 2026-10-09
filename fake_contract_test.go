@@ -54,6 +54,7 @@ func TestFakeValidation(t *testing.T) {
 		{"write probe/PUT requires ttl", "PUT", "/zones/example.com/records/18", fakeToken, `{"text":"token"}`, `{"message":"The given data was invalid.","errors":{"ttl":["Darf nicht leer sein."]}}`, 422},
 		{"write probe/CAA requires value", "POST", "/zones/example.com/records", fakeToken, `{"type":"CAA","name":"","flag":"0","tag":"issue","ttl":3600}`, `{"message":"The given data was invalid.","errors":{"value":["Darf nicht leer sein."]}}`, 422},
 		{"write probe/SRV requires priority and weight", "POST", "/zones/example.com/records", fakeToken, `{"type":"SRV","service":"_sip._tcp","port":443,"target":"t.example.com","ttl":3600}`, `{"message":"The given data was invalid.","errors":{"priority":["Darf nicht leer sein."],"weight":["Darf nicht leer sein."]}}`, 422},
+		{"CNAME PUT probe/name conflicts with itself", "PUT", "/zones/example.com/records/13", fakeToken, `{"name":"alias","cname":"site.example.com","ttl":7200}`, `{"message":"The given data was invalid.","errors":{"name":["CNAME Name muss innerhalb einer Zone einmalig sein. Auch kein Record eines anderen Typs darf denselben Namen haben."]}}`, 422},
 		{"write probe/CNAME trailing dot", "POST", "/zones/example.com/records", fakeToken, `{"type":"CNAME","name":"test","cname":"t.example.com.","ttl":3600}`, `{"message":"The given data was invalid.","errors":{"cname":["Kein gültiger Domainname."]}}`, 422},
 		{"write probe/MX null target", "POST", "/zones/example.com/records", fakeToken, `{"type":"MX","ownername":"","name":".","pref":0,"ttl":3600}`, `{"message":"The given data was invalid.","errors":{"name":["Kein gültiger Domainname.","is not valid"]}}`, 422},
 		{"write probe/SRV null target", "POST", "/zones/example.com/records", fakeToken, `{"type":"SRV","service":"_sip._tcp","priority":0,"weight":0,"port":443,"target":".","ttl":3600}`, `{"message":"The given data was invalid.","errors":{"target":["Kein gültiger Domainname."]}}`, 422},
@@ -100,6 +101,7 @@ func TestFakeRecordShapes(t *testing.T) {
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
 			f := newHosttechFake(t)
+			f.records[fakeZone] = nil
 			response := fakeRequest(t, f, "POST", "/zones/example.com/records", fakeToken, row.body, 201)
 			got := response["data"].(map[string]any)
 			id := got["id"]
@@ -122,17 +124,18 @@ func TestFakeRecordShapes(t *testing.T) {
 func TestFakeReplacementAndDeletion(t *testing.T) {
 	t.Parallel()
 	for _, row := range []struct {
-		name, method, body, want string
-		status                   int
+		name, method, path, body, want string
+		status                         int
 	}{
-		{"write probe/PUT ignores id and type", "PUT", `{"id":1,"type":"A","name":"test","text":"changed","ttl":600}`, `{"data":{"id":18,"type":"TXT","name":"test","text":"changed","ttl":600,"comment":null}}`, 200},
-		{"write probe/PUT without id and type", "PUT", `{"name":"test","text":"changed","ttl":600}`, `{"data":{"id":18,"type":"TXT","name":"test","text":"changed","ttl":600,"comment":null}}`, 200},
-		{"write probe/DELETE 204", "DELETE", "", "", 204},
+		{"write probe/PUT ignores id and type", "PUT", "/zones/example.com/records/18", `{"id":1,"type":"A","name":"test","text":"changed","ttl":600}`, `{"data":{"id":18,"type":"TXT","name":"test","text":"changed","ttl":600,"comment":null}}`, 200},
+		{"write probe/PUT without id and type", "PUT", "/zones/example.com/records/18", `{"name":"test","text":"changed","ttl":600}`, `{"data":{"id":18,"type":"TXT","name":"test","text":"changed","ttl":600,"comment":null}}`, 200},
+		{"CNAME PUT probe/omitted name keeps owner", "PUT", "/zones/example.com/records/13", `{"cname":"site.example.com","ttl":7200}`, `{"data":{"id":13,"type":"CNAME","name":"alias","cname":"site.example.com","ttl":7200,"comment":null}}`, 200},
+		{"write probe/DELETE 204", "DELETE", "/zones/example.com/records/18", "", "", 204},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
 			f := newHosttechFake(t)
-			got := fakeRequest(t, f, row.method, "/zones/example.com/records/18", fakeToken, row.body, row.status)
+			got := fakeRequest(t, f, row.method, row.path, fakeToken, row.body, row.status)
 			var want fakeObject
 			if row.want != "" {
 				if err := json.Unmarshal([]byte(row.want), &want); err != nil {
@@ -144,9 +147,9 @@ func TestFakeReplacementAndDeletion(t *testing.T) {
 			}
 			if row.method == "DELETE" {
 				want = fakeObject{"message": ""}
-				got = fakeRequest(t, f, "GET", "/zones/example.com/records/18", fakeToken, "", 404)
+				got = fakeRequest(t, f, "GET", row.path, fakeToken, "", 404)
 			} else {
-				got = fakeRequest(t, f, "GET", "/zones/example.com/records/18", fakeToken, "", 200)
+				got = fakeRequest(t, f, "GET", row.path, fakeToken, "", 200)
 			}
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("stored record=%v want=%v", got, want)
