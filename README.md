@@ -17,6 +17,13 @@ API token: hosttech control panel → API → Personal Access Tokens.
 
 ## Notes
 
-- TTLs below 600s are clamped to 600 (API minimum).
-- `SetRecords` does a single PUT for 1:1 RRset replacements; otherwise delete+create.
+- Supported types: A, AAAA, CAA, CNAME, MX, NS, PTR, SRV, TXT and TLSA.
+- The zone apex is `@` in libdns and is written as the API's empty owner.
+- TTLs below 600 seconds are raised to 600 (the API minimum).
+- `SetRecords` is not atomic. It preserves matching members, updates remaining
+  members with PUT, creates additional members, then deletes surplus members.
+  A failed write can leave confirmed partial changes or an unknown outcome;
+  writes are never retried automatically.
+- Writes are serialised per zone within one provider instance. Separate
+  instances and processes are not coordinated.
 - API reference: <https://api.ns1.hosttech.eu/api/documentation/api.yaml>

@@ -3,6 +3,8 @@
 package hosttech
 
 import (
+	"errors"
+
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 )
@@ -24,7 +26,13 @@ func (CaddyProvider) CaddyModule() caddy.ModuleInfo {
 
 // Provision sets up the module by resolving placeholder values.
 func (p *CaddyProvider) Provision(ctx caddy.Context) error {
-	p.Provider.APIToken = caddy.NewReplacer().ReplaceAll(p.Provider.APIToken, "")
+	if p.Provider == nil {
+		return errors.New("missing API token")
+	}
+	p.APIToken = caddy.NewReplacer().ReplaceAll(p.APIToken, "")
+	if p.APIToken == "" {
+		return errors.New("missing API token")
+	}
 	return nil
 }
 
@@ -34,32 +42,41 @@ func (p *CaddyProvider) Provision(ctx caddy.Context) error {
 //	    api_token <api_token>
 //	}
 func (p *CaddyProvider) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
+	if p.Provider == nil {
+		p.Provider = new(Provider)
+	}
 	for d.Next() {
-		if d.NextArg() {
-			p.Provider.APIToken = d.Val()
-		}
-		if d.NextArg() {
-			return d.ArgErr()
+		if err := p.readToken(d, false); err != nil {
+			return err
 		}
 		for nesting := d.Nesting(); d.NextBlock(nesting); {
-			switch d.Val() {
-			case "api_token":
-				if p.Provider.APIToken != "" {
-					return d.Err("API token already set")
-				}
-				if d.NextArg() {
-					p.Provider.APIToken = d.Val()
-				}
-				if d.NextArg() {
-					return d.ArgErr()
-				}
-			default:
-				return d.Errf("unrecognized subdirective '%s'", d.Val())
+			if d.Val() != "api_token" {
+				return d.Err("unrecognized subdirective")
+			}
+			if err := p.readToken(d, true); err != nil {
+				return err
 			}
 		}
 	}
-	if p.Provider.APIToken == "" {
+	if p.APIToken == "" {
 		return d.Err("missing API token")
+	}
+	return nil
+}
+
+func (p *CaddyProvider) readToken(d *caddyfile.Dispenser, required bool) error {
+	if !d.NextArg() {
+		if required {
+			return d.Err("missing API token")
+		}
+		return nil
+	}
+	if p.APIToken != "" {
+		return d.Err("API token already set")
+	}
+	p.APIToken = d.Val()
+	if d.NextArg() {
+		return d.Err("too many arguments")
 	}
 	return nil
 }

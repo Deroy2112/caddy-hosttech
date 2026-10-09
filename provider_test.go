@@ -165,6 +165,9 @@ func TestCaddyModuleBaseline(t *testing.T) {
 		{"missing", "hosttech", "missing API token"},
 		{"duplicate", "hosttech test-token {\n api_token other\n}", "API token already set"},
 		{"unknown", "hosttech {\n unknown value\n}", "unrecognized subdirective"},
+		{"extra inline", "hosttech test-token test-token", "too many arguments"},
+		{"extra block", "hosttech {\n api_token test-token test-token\n}", "too many arguments"},
+		{"token as directive", "hosttech {\n test-token\n}", "unrecognized subdirective"},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			info, err := caddy.GetModule("dns.providers.hosttech")
@@ -177,7 +180,7 @@ func TestCaddyModuleBaseline(t *testing.T) {
 			}
 			err = p.UnmarshalCaddyfile(caddyfile.NewTestDispenser(row.config))
 			if row.wantError != "" {
-				if err == nil || !strings.Contains(err.Error(), row.wantError) {
+				if err == nil || !strings.Contains(err.Error(), row.wantError) || strings.Contains(err.Error(), fakeToken) {
 					t.Fatalf("parse error=%v want=%s", err, row.wantError)
 				}
 				return
