@@ -142,7 +142,7 @@ func (w *setWork) update(ctx context.Context, c *client, zone string) error {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("setting records: %w", err)
 		}
-		rec, err := c.updateRecord(ctx, zone, job.id, *w.desired[job.index])
+		rec, err := c.updateRecord(ctx, zone, job.id, w.desired[job.index])
 		if err != nil {
 			return err
 		}
@@ -156,7 +156,7 @@ func (w *setWork) create(ctx context.Context, c *client, zone string) error {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("setting records: %w", err)
 		}
-		rec, err := c.createRecord(ctx, zone, *w.desired[index])
+		rec, err := c.createRecord(ctx, zone, w.desired[index])
 		if err != nil {
 			return err
 		}

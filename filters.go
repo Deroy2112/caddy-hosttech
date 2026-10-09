@@ -101,6 +101,10 @@ func matchesRR(rec *apiRecord, filter *deleteFilter) bool {
 }
 
 func missingRecord(err error) bool {
+	var bodyErr responseBodyError
+	if errors.As(err, &bodyErr) {
+		return false
+	}
 	var apiErr APIError
 	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound
 }

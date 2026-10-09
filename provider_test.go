@@ -4,6 +4,7 @@ package hosttech
 
 import (
 	"errors"
+	"net/http"
 	"net/netip"
 	"reflect"
 	"slices"
@@ -42,6 +43,12 @@ func TestProviderBaseline(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			f := newHosttechFake(t)
+			f.before = func(r *http.Request) int {
+				if r.Header.Get("Accept") != "application/json" {
+					t.Errorf("%s request does not accept JSON", r.Method)
+				}
+				return 0
+			}
 			var p dnsProvider = f.provider(t)
 			if name == "CaddyProvider" {
 				p = &CaddyProvider{p.(*Provider)}

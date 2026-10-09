@@ -18,6 +18,7 @@ func fakeRequest(t *testing.T, f *hosttechFake, method, path, token, body string
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
+	req.Header.Set("Accept", "application/json")
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}

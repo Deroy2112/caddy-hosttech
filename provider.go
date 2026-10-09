@@ -60,7 +60,7 @@ func (p *Provider) AppendRecords(ctx context.Context, zone string, records []lib
 	var created []libdns.Record
 
 	for i := range mapped {
-		apiRec := mapped[i]
+		apiRec := &mapped[i]
 		resp, err := p.client.createRecord(ctx, zoneName, apiRec)
 		if err != nil {
 			return created, err

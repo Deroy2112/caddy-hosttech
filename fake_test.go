@@ -230,6 +230,10 @@ func (f *hosttechFake) writeRecord(w http.ResponseWriter, r *http.Request, zone 
 		body["type"] = f.records[zone][index]["type"]
 	}
 	if errs := fakeValidation(body, f.records[zone]); len(errs) > 0 {
+		if r.Header.Get("Accept") != "application/json" {
+			http.Redirect(w, r, "https://api.ns1.hosttech.eu", http.StatusFound)
+			return
+		}
 		f.reply(w, http.StatusUnprocessableEntity, fakeObject{"message": "The given data was invalid.", "errors": errs})
 		return
 	}
