@@ -37,13 +37,16 @@ func (p *Provider) GetRecords(ctx context.Context, zone string) ([]libdns.Record
 
 	result := make([]libdns.Record, 0, len(records))
 	for _, rec := range records {
-		result = append(result, rec.toLibdns(zoneName))
+		result = append(result, rec.toLibdns())
 	}
 	return result, nil
 }
 
 // AppendRecords adds records to the zone and returns the created records.
 func (p *Provider) AppendRecords(ctx context.Context, zone string, records []libdns.Record) ([]libdns.Record, error) {
+	if err := validateNames(records); err != nil {
+		return nil, err
+	}
 	p.initClient()
 
 	zoneName := removeTrailingDot(zone)
@@ -55,7 +58,7 @@ func (p *Provider) AppendRecords(ctx context.Context, zone string, records []lib
 		if err != nil {
 			return created, err
 		}
-		created = append(created, resp.toLibdns(zoneName))
+		created = append(created, resp.toLibdns())
 	}
 
 	return created, nil
@@ -70,6 +73,9 @@ func (p *Provider) AppendRecords(ctx context.Context, zone string, records []lib
 // input and zone each contain exactly one record for that (name, type),
 // we issue a single PUT to avoid the delete+create race window.
 func (p *Provider) SetRecords(ctx context.Context, zone string, records []libdns.Record) ([]libdns.Record, error) {
+	if err := validateNames(records); err != nil {
+		return nil, err
+	}
 	p.initClient()
 	zoneName := removeTrailingDot(zone)
 
@@ -96,7 +102,7 @@ func (p *Provider) SetRecords(ctx context.Context, zone string, records []libdns
 
 		var existing []apiRecord
 		for _, apiRec := range zoneRecs {
-			if normalizeName(recordName(apiRec)) == key.name && apiRec.Type == key.typ {
+			if normalizeName(recordName(&apiRec)) == key.name && apiRec.Type == key.typ {
 				existing = append(existing, apiRec)
 			}
 		}
@@ -106,7 +112,7 @@ func (p *Provider) SetRecords(ctx context.Context, zone string, records []libdns
 			if err != nil {
 				return result, fmt.Errorf("updating record %d (%s %s): %w", existing[0].ID, key.name, key.typ, err)
 			}
-			result = append(result, resp.toLibdns(zoneName))
+			result = append(result, resp.toLibdns())
 			continue
 		}
 
@@ -120,7 +126,7 @@ func (p *Provider) SetRecords(ctx context.Context, zone string, records []libdns
 			if err != nil {
 				return result, fmt.Errorf("creating record (%s %s): %w", key.name, key.typ, err)
 			}
-			result = append(result, resp.toLibdns(zoneName))
+			result = append(result, resp.toLibdns())
 		}
 	}
 
@@ -157,10 +163,10 @@ func (p *Provider) DeleteRecords(ctx context.Context, zone string, records []lib
 				continue
 			}
 			if err := p.client.deleteRecord(ctx, zoneName, apiRec.ID); err != nil {
-				return deleted, fmt.Errorf("deleting record %d (%s %s): %w", apiRec.ID, recordName(apiRec), apiRec.Type, err)
+				return deleted, fmt.Errorf("deleting record %d (%s %s): %w", apiRec.ID, recordName(&apiRec), apiRec.Type, err)
 			}
 			consumed[apiRec.ID] = true
-			deleted = append(deleted, apiRec.toLibdns(zoneName))
+			deleted = append(deleted, apiRec.toLibdns())
 		}
 	}
 

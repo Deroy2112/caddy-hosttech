@@ -14,4 +14,5 @@ const (
 	recordTypeTXT      = "TXT"
 	recordTypeTLSA     = "TLSA"
 	responseKindRecord = "record"
+	fieldName          = "name"
 )

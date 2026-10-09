@@ -58,18 +58,26 @@ func (c *client) getRecords(ctx context.Context, zone string) ([]apiRecord, erro
 }
 
 func (c *client) createRecord(ctx context.Context, zone string, rec apiRecord) (apiRecord, error) {
+	body, err := recordBody(&rec, true)
+	if err != nil {
+		return apiRecord{}, err
+	}
 	var resp apiResponse[apiRecord]
 	path := fmt.Sprintf("/zones/%s/records", zone)
-	if err := c.doJSON(ctx, http.MethodPost, path, rec, &resp); err != nil {
+	if err := c.doJSON(ctx, http.MethodPost, path, body, &resp); err != nil {
 		return apiRecord{}, fmt.Errorf("creating record in zone %s: %w", zone, err)
 	}
 	return resp.Data, nil
 }
 
 func (c *client) updateRecord(ctx context.Context, zone string, recordID int, rec apiRecord) (apiRecord, error) {
+	body, err := recordBody(&rec, false)
+	if err != nil {
+		return apiRecord{}, err
+	}
 	var resp apiResponse[apiRecord]
 	path := fmt.Sprintf("/zones/%s/records/%d", zone, recordID)
-	if err := c.doJSON(ctx, http.MethodPut, path, rec, &resp); err != nil {
+	if err := c.doJSON(ctx, http.MethodPut, path, body, &resp); err != nil {
 		return apiRecord{}, fmt.Errorf("updating record %d in zone %s: %w", recordID, zone, err)
 	}
 	return resp.Data, nil

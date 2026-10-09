@@ -70,8 +70,9 @@ type apiRecord struct {
 	Target   string `json:"target,omitempty"`
 
 	// CAA
-	Flag string `json:"flag,omitempty"`
-	Tag  string `json:"tag,omitempty"`
+	Flag  string `json:"flag,omitempty"`
+	Tag   string `json:"tag,omitempty"`
+	Value string `json:"value,omitempty"`
 
 	// PTR
 	Origin string `json:"origin,omitempty"`
@@ -81,25 +82,26 @@ type apiRecord struct {
 }
 
 // toLibdns converts a hosttech API record to a typed libdns.Record.
-func (r apiRecord) toLibdns(zone string) libdns.Record {
+func (r *apiRecord) toLibdns() libdns.Record {
+	name := recordName(r)
 	switch r.Type {
 	case recordTypeA, recordTypeAAAA:
 		return libdns.Address{
-			Name:         libdns.RelativeName(r.Name, zone),
+			Name:         name,
 			TTL:          time.Duration(r.TTL) * time.Second,
 			IP:           r.ip,
 			ProviderData: r.ID,
 		}
 	case recordTypeCNAME:
 		return libdns.CNAME{
-			Name:         libdns.RelativeName(r.Name, zone),
+			Name:         name,
 			TTL:          time.Duration(r.TTL) * time.Second,
 			Target:       r.CName,
 			ProviderData: r.ID,
 		}
 	case recordTypeMX:
 		return libdns.MX{
-			Name:         libdns.RelativeName(r.OwnerName, zone),
+			Name:         name,
 			TTL:          time.Duration(r.TTL) * time.Second,
 			Preference:   r.Pref,
 			Target:       r.Name,
@@ -107,32 +109,23 @@ func (r apiRecord) toLibdns(zone string) libdns.Record {
 		}
 	case recordTypeNS:
 		return libdns.NS{
-			Name:         libdns.RelativeName(r.OwnerName, zone),
+			Name:         name,
 			TTL:          time.Duration(r.TTL) * time.Second,
 			Target:       r.TargetName,
 			ProviderData: r.ID,
 		}
 	case recordTypeTXT:
 		return libdns.TXT{
-			Name:         libdns.RelativeName(r.Name, zone),
+			Name:         name,
 			TTL:          time.Duration(r.TTL) * time.Second,
 			Text:         r.Text,
 			ProviderData: r.ID,
 		}
 	case recordTypeSRV:
-		return libdns.SRV{
-			Service:      r.Service,
-			Name:         libdns.RelativeName(r.Name, zone),
-			TTL:          time.Duration(r.TTL) * time.Second,
-			Priority:     r.Priority,
-			Weight:       r.Weight,
-			Port:         r.Port,
-			Target:       r.Target,
-			ProviderData: r.ID,
-		}
+		return r.srvRecord()
 	case recordTypeCAA:
 		return libdns.CAA{
-			Name:         libdns.RelativeName(r.Name, zone),
+			Name:         name,
 			TTL:          time.Duration(r.TTL) * time.Second,
 			Flags:        r.flags,
 			Tag:          r.Tag,
@@ -140,10 +133,8 @@ func (r apiRecord) toLibdns(zone string) libdns.Record {
 			ProviderData: r.ID,
 		}
 	case recordTypePTR, recordTypeTLSA:
-		name := r.Name
 		data := r.Text
 		if r.Type == recordTypePTR {
-			name = r.Origin
 			data = r.Name
 		}
 		return libdns.RR{
@@ -198,8 +189,7 @@ func fromLibdns(rec libdns.Record, zone string) apiRecord {
 		r.Name = v.Name
 		r.Text = v.Text
 	case libdns.SRV:
-		r.Service = v.Service
-		r.Name = v.Name
+		r.Service = v.RR().Name
 		r.Priority = v.Priority
 		r.Weight = v.Weight
 		r.Port = v.Port
@@ -221,6 +211,7 @@ func fromLibdns(rec libdns.Record, zone string) apiRecord {
 		}
 	}
 
+	normalizeWrite(&r)
 	return r
 }
 
@@ -269,14 +260,16 @@ func removeTrailingDot(s string) string {
 // recordName returns the record's owner name from a hosttech apiRecord,
 // regardless of type. Hosttech stores MX/NS owners in OwnerName and PTR
 // owners in Origin; all others use Name.
-func recordName(r apiRecord) string {
+func recordName(r *apiRecord) string {
 	switch r.Type {
 	case recordTypeMX, recordTypeNS:
-		return r.OwnerName
+		return libdnsOwner(r.OwnerName)
 	case recordTypePTR:
-		return r.Origin
+		return libdnsOwner(r.Origin)
+	case recordTypeSRV:
+		return libdnsOwner(r.Service)
 	default:
-		return r.Name
+		return libdnsOwner(r.Name)
 	}
 }
 
@@ -295,7 +288,7 @@ func normalizeName(n string) string {
 // re-canonicalising want via fromLibdns so both sides go through the same
 // transform, avoiding representation drift.
 func matchesRR(apiRec apiRecord, want libdns.RR, zone string) bool {
-	if normalizeName(recordName(apiRec)) != normalizeName(want.Name) {
+	if normalizeName(recordName(&apiRec)) != normalizeName(want.Name) {
 		return false
 	}
 	if want.Type != "" && apiRec.Type != want.Type {
