@@ -34,9 +34,11 @@ func (z apiZone) toLibdns() libdns.Zone {
 // apiRecord is a polymorphic record from the hosttech API.
 // The Type field determines which other fields are populated.
 type apiRecord struct {
-	ID   int    `json:"id,omitempty"`
-	Type string `json:"type"`
-	TTL  int    `json:"ttl,omitempty"`
+	ip    netip.Addr
+	flags uint8
+	ID    int    `json:"id,omitempty"`
+	Type  string `json:"type"`
+	TTL   int    `json:"ttl,omitempty"`
 
 	// A / AAAA / CNAME / TXT / TLSA / CAA
 	Name string `json:"name,omitempty"`
@@ -81,30 +83,21 @@ type apiRecord struct {
 // toLibdns converts a hosttech API record to a typed libdns.Record.
 func (r apiRecord) toLibdns(zone string) libdns.Record {
 	switch r.Type {
-	case "A":
-		ip, _ := netip.ParseAddr(r.IPv4)
+	case recordTypeA, recordTypeAAAA:
 		return libdns.Address{
 			Name:         libdns.RelativeName(r.Name, zone),
 			TTL:          time.Duration(r.TTL) * time.Second,
-			IP:           ip,
+			IP:           r.ip,
 			ProviderData: r.ID,
 		}
-	case "AAAA":
-		ip, _ := netip.ParseAddr(r.IPv6)
-		return libdns.Address{
-			Name:         libdns.RelativeName(r.Name, zone),
-			TTL:          time.Duration(r.TTL) * time.Second,
-			IP:           ip,
-			ProviderData: r.ID,
-		}
-	case "CNAME":
+	case recordTypeCNAME:
 		return libdns.CNAME{
 			Name:         libdns.RelativeName(r.Name, zone),
 			TTL:          time.Duration(r.TTL) * time.Second,
 			Target:       r.CName,
 			ProviderData: r.ID,
 		}
-	case "MX":
+	case recordTypeMX:
 		return libdns.MX{
 			Name:         libdns.RelativeName(r.OwnerName, zone),
 			TTL:          time.Duration(r.TTL) * time.Second,
@@ -112,21 +105,21 @@ func (r apiRecord) toLibdns(zone string) libdns.Record {
 			Target:       r.Name,
 			ProviderData: r.ID,
 		}
-	case "NS":
+	case recordTypeNS:
 		return libdns.NS{
 			Name:         libdns.RelativeName(r.OwnerName, zone),
 			TTL:          time.Duration(r.TTL) * time.Second,
 			Target:       r.TargetName,
 			ProviderData: r.ID,
 		}
-	case "TXT":
+	case recordTypeTXT:
 		return libdns.TXT{
 			Name:         libdns.RelativeName(r.Name, zone),
 			TTL:          time.Duration(r.TTL) * time.Second,
 			Text:         r.Text,
 			ProviderData: r.ID,
 		}
-	case "SRV":
+	case recordTypeSRV:
 		return libdns.SRV{
 			Service:      r.Service,
 			Name:         libdns.RelativeName(r.Name, zone),
@@ -137,20 +130,19 @@ func (r apiRecord) toLibdns(zone string) libdns.Record {
 			Target:       r.Target,
 			ProviderData: r.ID,
 		}
-	case "CAA":
-		flags, _ := strconv.ParseUint(r.Flag, 10, 8)
+	case recordTypeCAA:
 		return libdns.CAA{
 			Name:         libdns.RelativeName(r.Name, zone),
 			TTL:          time.Duration(r.TTL) * time.Second,
-			Flags:        uint8(flags),
+			Flags:        r.flags,
 			Tag:          r.Tag,
 			Value:        r.Name,
 			ProviderData: r.ID,
 		}
-	case "PTR", "TLSA":
+	case recordTypePTR, recordTypeTLSA:
 		name := r.Name
 		data := r.Text
-		if r.Type == "PTR" {
+		if r.Type == recordTypePTR {
 			name = r.Origin
 			data = r.Name
 		}
@@ -186,10 +178,10 @@ func fromLibdns(rec libdns.Record, zone string) apiRecord {
 	case libdns.Address:
 		r.Name = v.Name
 		if v.IP.Is4() {
-			r.Type = "A"
+			r.Type = recordTypeA
 			r.IPv4 = v.IP.String()
 		} else {
-			r.Type = "AAAA"
+			r.Type = recordTypeAAAA
 			r.IPv6 = v.IP.String()
 		}
 	case libdns.CNAME:
@@ -219,10 +211,10 @@ func fromLibdns(rec libdns.Record, zone string) apiRecord {
 	case libdns.RR:
 		r.Name = v.Name
 		switch v.Type {
-		case "PTR":
+		case recordTypePTR:
 			r.Origin = v.Name
 			r.Name = v.Data
-		case "TLSA":
+		case recordTypeTLSA:
 			r.Text = v.Data
 		default:
 			r.Text = v.Data
@@ -279,9 +271,9 @@ func removeTrailingDot(s string) string {
 // owners in Origin; all others use Name.
 func recordName(r apiRecord) string {
 	switch r.Type {
-	case "MX", "NS":
+	case recordTypeMX, recordTypeNS:
 		return r.OwnerName
-	case "PTR":
+	case recordTypePTR:
 		return r.Origin
 	default:
 		return r.Name
@@ -323,25 +315,25 @@ func matchesRR(apiRec apiRecord, want libdns.RR, zone string) bool {
 // It assumes both have the same Type (caller is responsible).
 func sameValue(a, b apiRecord) bool {
 	switch a.Type {
-	case "A":
+	case recordTypeA:
 		return a.IPv4 == b.IPv4
-	case "AAAA":
+	case recordTypeAAAA:
 		return a.IPv6 == b.IPv6
-	case "CNAME":
+	case recordTypeCNAME:
 		return a.CName == b.CName
-	case "MX":
+	case recordTypeMX:
 		return a.Name == b.Name && a.Pref == b.Pref
-	case "NS":
+	case recordTypeNS:
 		return a.TargetName == b.TargetName
-	case "TXT":
+	case recordTypeTXT:
 		return txtEqual(a.Text, b.Text)
-	case "SRV":
+	case recordTypeSRV:
 		return a.Service == b.Service &&
 			a.Priority == b.Priority &&
 			a.Weight == b.Weight &&
 			a.Port == b.Port &&
 			a.Target == b.Target
-	case "CAA":
+	case recordTypeCAA:
 		return a.Flag == b.Flag && a.Tag == b.Tag && a.Name == b.Name
 	default:
 		return a.Text == b.Text

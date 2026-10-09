@@ -50,12 +50,13 @@ var fakeRecordFields = map[string][]string{
 }
 
 type hosttechFake struct {
-	t       *testing.T
-	server  *httptest.Server
-	mu      sync.Mutex
-	zones   []fakeObject
-	records map[string][]fakeObject
-	nextID  int
+	t        *testing.T
+	server   *httptest.Server
+	mu       sync.Mutex
+	zones    []fakeObject
+	records  map[string][]fakeObject
+	nextID   int
+	response func(int, fakeObject) fakeObject
 }
 
 func newHosttechFake(t *testing.T) *hosttechFake {
@@ -276,6 +277,9 @@ func fakeValidation(body fakeObject) map[string][]string {
 }
 
 func (f *hosttechFake) reply(w http.ResponseWriter, status int, body fakeObject) {
+	if f.response != nil {
+		body = f.response(status, body)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(body); err != nil {

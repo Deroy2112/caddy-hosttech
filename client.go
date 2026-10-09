@@ -104,7 +104,7 @@ func (c *client) doJSON(ctx context.Context, method, path string, body any, resu
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("executing request: %w", err)
+		return requestOutcome(method, fmt.Errorf("executing request: %w", err))
 	}
 	defer resp.Body.Close()
 
@@ -120,10 +120,10 @@ func (c *client) doJSON(ctx context.Context, method, path string, body any, resu
 	if result != nil {
 		respBody, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return fmt.Errorf("reading response body: %w", err)
+			return requestOutcome(method, fmt.Errorf("reading response body: %w", err))
 		}
 		if err := json.Unmarshal(respBody, result); err != nil {
-			return fmt.Errorf("decoding response: %w", err)
+			return requestOutcome(method, fmt.Errorf("decoding response: %w", err))
 		}
 	}
 
