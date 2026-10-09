@@ -19,4 +19,4 @@ API token: hosttech control panel → API → Personal Access Tokens.
 
 - TTLs below 600s are clamped to 600 (API minimum).
 - `SetRecords` does a single PUT for 1:1 RRset replacements; otherwise delete+create.
-- `api.yaml` pins the API version this client was written against.
+- API reference: <https://api.ns1.hosttech.eu/api/documentation/api.yaml>

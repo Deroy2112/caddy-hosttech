@@ -1,8 +1,12 @@
+.*/
+_*/
+!.github/
+!.forgejo/
+AGENTS.md
+CLAUDE.md
+
 # Compiled binaries
 caddy-hosttech
-*.exe
 # Build artefacts
 build/
 # IDE
-.idea/
-.vscode/
