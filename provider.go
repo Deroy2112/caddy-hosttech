@@ -37,8 +37,8 @@ func (p *Provider) GetRecords(ctx context.Context, zone string) ([]libdns.Record
 	}
 
 	result := make([]libdns.Record, 0, len(records))
-	for _, rec := range records {
-		result = append(result, rec.toLibdns())
+	for i := range records {
+		result = append(result, records[i].toLibdns())
 	}
 	return result, nil
 }
@@ -75,10 +75,10 @@ func (p *Provider) AppendRecords(ctx context.Context, zone string, records []lib
 // (name, type) pair in the input, the only records in the output zone with
 // that pair are those provided in the input. Other RRsets are untouched.
 //
-// The hosttech API offers no RRset-level replace, so per RRset we delete all
-// existing members not reused and create the remaining inputs. Where the
-// input and zone each contain exactly one record for that (name, type),
-// we issue a single PUT to avoid the delete+create race window.
+// Matching members are preserved; remaining members are updated with PUT,
+// additional inputs are created, and surplus members are deleted last.
+// The operation is not atomic. On error it returns confirmed records;
+// a lost or malformed write response reports an unknown outcome without retry.
 func (p *Provider) SetRecords(ctx context.Context, zone string, records []libdns.Record) ([]libdns.Record, error) {
 	mapped, err := prepareRecords(records)
 	if err != nil {
@@ -154,8 +154,8 @@ func (p *Provider) ListZones(ctx context.Context) ([]libdns.Zone, error) {
 	}
 
 	result := make([]libdns.Zone, 0, len(zones))
-	for _, z := range zones {
-		result = append(result, z.toLibdns())
+	for i := range zones {
+		result = append(result, zones[i].toLibdns())
 	}
 	return result, nil
 }

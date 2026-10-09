@@ -2,6 +2,9 @@
 
 version: "2"
 
+run:
+  build-tags: [live]
+
 # Deliberately strict: fix findings at the cause and never suppress inline.
 # Documented exceptions live in exclusions.rules.
 linters:

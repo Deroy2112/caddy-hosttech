@@ -27,7 +27,7 @@ type apiZone struct {
 	DNSSECEmail string `json:"dnssec_email,omitempty"`
 }
 
-func (z apiZone) toLibdns() libdns.Zone {
+func (z *apiZone) toLibdns() libdns.Zone {
 	return libdns.Zone{Name: z.Name + "."}
 }
 
@@ -144,12 +144,7 @@ func (r *apiRecord) toLibdns() libdns.Record {
 			Data: data,
 		}
 	default:
-		return libdns.RR{
-			Name: r.Name,
-			TTL:  time.Duration(r.TTL) * time.Second,
-			Type: r.Type,
-			Data: r.Text,
-		}
+		panic("unvalidated record type")
 	}
 }
 
