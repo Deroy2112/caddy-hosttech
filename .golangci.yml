@@ -1,0 +1,134 @@
+# SPDX-License-Identifier: MIT
+
+version: "2"
+
+# Deliberately strict: fix findings at the cause and never suppress inline.
+# Documented exceptions live in exclusions.rules.
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    # --- critical bugs & security ---
+    - gosec # security: weak crypto, file perms, hardcoded creds, integer overflow
+    - bodyclose # HTTP response bodies must be closed
+    - nilnil # no ambiguous (nil, nil) returns
+    - nilerr # no `return nil` when err is non-nil
+    - errorlint # %w wrapping + correct errors.Is/As
+    - errname # error vars Err-prefixed, error types Err-suffixed
+    - unparam # unused function parameters
+    - reassign # no reassigning another package's top-level vars
+    # --- code quality & cleanliness ---
+    - gocritic # broad diagnostic/style/performance set
+    - revive # golint successor (ruleset below)
+    - unconvert # remove redundant type conversions
+    - wastedassign # assignments never used
+    - prealloc # slices that could be preallocated
+    - dupl # clone detection (high threshold, excluded from tests)
+    - goconst # repeated strings → const
+    - predeclared # no shadowing of predeclared identifiers
+    - misspell # spelling in comments/strings
+    - modernize # modern Go idioms (slices/maps, min/max, range-over-int)
+    # --- complexity & readability ---
+    - cyclop # cyclomatic complexity
+    - gocognit # cognitive complexity
+    - funlen # function length
+    - nestif # deeply nested if blocks
+    - lll # long lines
+    - nakedret # naked returns in longer functions
+    # --- modern go / correctness ---
+    - exhaustive # enum switches must be exhaustive (or have default)
+    - wrapcheck # wrap errors crossing a package boundary
+    - nolintlint # checks the form of a directive only, not that none exists
+    # --- tests ---
+    - thelper # test helpers must call t.Helper()
+    - tparallel # correct t.Parallel() usage
+    - usetesting # use t.Context()/t.Setenv() etc. over manual equivalents
+  settings:
+    lll:
+      line-length: 120
+    funlen:
+      lines: 70
+      statements: 50
+      ignore-comments: true
+    cyclop:
+      max-complexity: 12
+    gocognit:
+      min-complexity: 20
+    nestif:
+      min-complexity: 4
+    dupl:
+      threshold: 150
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+    nakedret:
+      max-func-lines: 30
+    exhaustive:
+      default-signifies-exhaustive: true
+    gocritic:
+      enabled-tags: [diagnostic, performance, style, opinionated]
+    revive:
+      rules:
+        - name: exported
+        - name: error-return
+        - name: error-naming
+        - name: error-strings
+        - name: var-naming
+        - name: receiver-naming
+        - name: unexported-return
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: indent-error-flow
+        - name: superfluous-else
+        - name: if-return
+        - name: errorf
+        - name: range
+        - name: time-naming
+        - name: unreachable-code
+        - name: redefines-builtin-id
+        - name: blank-imports
+  exclusions:
+    rules:
+      # Tests are legitimately long, repetitive, and not a security/API surface.
+      # thelper/tparallel/usetesting stay on for tests; they target test code.
+      - path: _test\.go
+        linters:
+          - gosec
+          - revive
+          - funlen
+          - dupl
+          - goconst
+          - gocognit
+          - cyclop
+          - wrapcheck
+          - lll
+          - bodyclose
+      # Dispenser errors already wrap the cause with the Caddyfile file and line;
+      # wrapping them again only repeats that context.
+      - path: ^module\.go$
+        text: caddyfile\.Dispenser
+        linters:
+          - wrapcheck
+      # caddy.Provisioner fixes Provision(caddy.Context) by value, so gocritic's
+      # hugeParam cannot be satisfied here.
+      - path: ^module\.go$
+        text: "hugeParam: ctx is heavy"
+        linters:
+          - gocritic
+
+# The gate is judged at zero findings; the default caps (3 same issues, 50 per
+# linter) would silently truncate the report.
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - gofumpt # stricter superset of gofmt
+    - goimports
+  exclusions:
+    paths:
+      # The go tool skips _-prefixed directories, but `golangci-lint fmt` walks
+      # the filesystem and would reformat reference repositories.
+      - ^_sources/
+      - ^_helpers/
+      - ^_docs/
