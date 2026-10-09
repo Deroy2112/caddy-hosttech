@@ -54,11 +54,38 @@ func newClient(apiToken string) *client {
 }
 
 func (c *client) listZones(ctx context.Context) ([]apiZone, error) {
-	var resp apiResponse[[]apiZone]
-	if err := c.doJSON(ctx, http.MethodGet, "/zones", nil, &resp); err != nil {
-		return nil, fmt.Errorf("listing zones: %w", err)
+	const pageSize = 100
+	var zones []apiZone
+	seen := make(map[int]struct{})
+	for offset := 0; ; offset += pageSize {
+		var resp apiResponse[[]apiZone]
+		path := fmt.Sprintf("/zones?limit=%d&offset=%d", pageSize, offset)
+		if err := c.doJSON(ctx, http.MethodGet, path, nil, &resp); err != nil {
+			return nil, fmt.Errorf("listing zones: %w", err)
+		}
+		added := 0
+		for i := range resp.Data {
+			zone := &resp.Data[i]
+			if _, exists := seen[zone.ID]; exists {
+				continue
+			}
+			seen[zone.ID] = struct{}{}
+			zones = append(zones, *zone)
+			added++
+		}
+		if len(resp.Data) < pageSize {
+			return zones, nil
+		}
+		if added == 0 {
+			return nil, paginationError{offset: offset}
+		}
 	}
-	return resp.Data, nil
+}
+
+type paginationError struct{ offset int }
+
+func (e paginationError) Error() string {
+	return fmt.Sprintf("listing zones: full page at offset %d contains no new zones", e.offset)
 }
 
 func (c *client) getRecords(ctx context.Context, zone string) ([]apiRecord, error) {
