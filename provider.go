@@ -17,6 +17,7 @@ type Provider struct {
 	once   sync.Once
 	mu     sync.Mutex
 	client *client
+	zones  map[string]chan struct{}
 }
 
 func (p *Provider) initClient() {
@@ -48,6 +49,11 @@ func (p *Provider) AppendRecords(ctx context.Context, zone string, records []lib
 	if err != nil {
 		return nil, err
 	}
+	release, err := p.lockZone(ctx, zone)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	p.initClient()
 
 	zoneName := removeTrailingDot(zone)
@@ -78,61 +84,18 @@ func (p *Provider) SetRecords(ctx context.Context, zone string, records []libdns
 	if err != nil {
 		return nil, err
 	}
+	release, err := p.lockZone(ctx, zone)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	p.initClient()
 	zoneName := removeTrailingDot(zone)
-
-	zoneRecs, err := p.client.getRecords(ctx, zoneName)
+	existing, err := p.client.getRecords(ctx, zoneName)
 	if err != nil {
 		return nil, fmt.Errorf("listing zone records: %w", err)
 	}
-
-	type rrsetKey struct{ name, typ string }
-	groups := make(map[rrsetKey][]apiRecord)
-	order := make([]rrsetKey, 0)
-	for i := range mapped {
-		rec := mapped[i]
-		key := rrsetKey{normalizeName(recordName(&rec)), rec.Type}
-		if _, seen := groups[key]; !seen {
-			order = append(order, key)
-		}
-		groups[key] = append(groups[key], rec)
-	}
-
-	var result []libdns.Record
-	for _, key := range order {
-		inputs := groups[key]
-
-		var existing []apiRecord
-		for _, apiRec := range zoneRecs {
-			if normalizeName(recordName(&apiRec)) == key.name && apiRec.Type == key.typ {
-				existing = append(existing, apiRec)
-			}
-		}
-
-		if len(existing) == 1 && len(inputs) == 1 {
-			resp, err := p.client.updateRecord(ctx, zoneName, existing[0].ID, inputs[0])
-			if err != nil {
-				return result, fmt.Errorf("updating record %d (%s %s): %w", existing[0].ID, key.name, key.typ, err)
-			}
-			result = append(result, resp.toLibdns())
-			continue
-		}
-
-		for _, e := range existing {
-			if err := p.client.deleteRecord(ctx, zoneName, e.ID); err != nil {
-				return result, fmt.Errorf("deleting existing record %d (%s %s): %w", e.ID, key.name, key.typ, err)
-			}
-		}
-		for _, rec := range inputs {
-			resp, err := p.client.createRecord(ctx, zoneName, rec)
-			if err != nil {
-				return result, fmt.Errorf("creating record (%s %s): %w", key.name, key.typ, err)
-			}
-			result = append(result, resp.toLibdns())
-		}
-	}
-
-	return result, nil
+	return planSet(mapped, existing).apply(ctx, p.client, zoneName)
 }
 
 // DeleteRecords implements the libdns [RecordDeleter] contract: records are
@@ -148,6 +111,11 @@ func (p *Provider) DeleteRecords(ctx context.Context, zone string, records []lib
 	if err != nil {
 		return nil, err
 	}
+	release, err := p.lockZone(ctx, zone)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	p.initClient()
 	zoneName := removeTrailingDot(zone)
 	zoneRecs, err := p.client.getRecords(ctx, zoneName)
