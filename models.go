@@ -174,6 +174,7 @@ func fromLibdns(rec libdns.Record) (apiRecord, error) {
 func mapParsedRecord(r *apiRecord, parsed libdns.Record) error {
 	switch v := parsed.(type) {
 	case libdns.Address:
+		r.ip = v.IP
 		if v.IP.Is4() {
 			r.IPv4 = v.IP.String()
 		} else {
@@ -191,6 +192,7 @@ func mapParsedRecord(r *apiRecord, parsed libdns.Record) error {
 		r.Service, r.Name = v.RR().Name, ""
 		r.Priority, r.Weight, r.Port, r.Target = v.Priority, v.Weight, v.Port, v.Target
 	case libdns.CAA:
+		r.flags = v.Flags
 		r.Flag, r.Tag, r.Value = strconv.Itoa(int(v.Flags)), v.Tag, v.Value
 	case libdns.RR:
 		if v.Type == recordTypePTR {
@@ -213,14 +215,10 @@ func clampTTL(ttl time.Duration) int {
 	return seconds
 }
 
-// removeTrailingDot strips a trailing dot from a zone name.
 func removeTrailingDot(s string) string {
 	return strings.TrimSuffix(s, ".")
 }
 
-// recordName returns the record's owner name from a hosttech apiRecord,
-// regardless of type. Hosttech stores MX/NS owners in OwnerName and PTR
-// owners in Origin; all others use Name.
 func recordName(r *apiRecord) string {
 	switch r.Type {
 	case recordTypeMX, recordTypeNS:
@@ -243,71 +241,62 @@ func normalizeName(n string) string {
 	return n
 }
 
-// matchesRR reports whether apiRec satisfies the libdns filter defined by want.
-// Per [libdns.RecordDeleter] semantics, empty Type/TTL/Data act as wildcards
-// while Name is mandatory. Type-specific value comparison is performed by
-// re-canonicalising want via fromLibdns so both sides go through the same
-// transform, avoiding representation drift.
-func matchesRR(apiRec *apiRecord, want libdns.RR) bool {
-	if normalizeName(recordName(apiRec)) != normalizeName(want.Name) {
+func sameValue(a, b *apiRecord) bool {
+	if a.Type != b.Type {
 		return false
 	}
-	if want.Type != "" && apiRec.Type != want.Type {
-		return false
-	}
-	if want.TTL != 0 && apiRec.TTL != int(want.TTL.Seconds()) {
-		return false
-	}
-	if want.Data == "" {
-		return true
-	}
-	mapped, err := fromLibdns(want)
-	if err != nil {
-		return false
-	}
-	return sameValue(*apiRec, mapped)
-}
-
-// sameValue compares the type-specific value fields of two apiRecords.
-// It assumes both have the same Type (caller is responsible).
-func sameValue(a, b apiRecord) bool {
 	switch a.Type {
-	case recordTypeA:
-		return a.IPv4 == b.IPv4
-	case recordTypeAAAA:
-		return a.IPv6 == b.IPv6
+	case recordTypeA, recordTypeAAAA:
+		return a.ip == b.ip
 	case recordTypeCNAME:
-		return a.CName == b.CName
+		return targetValue(a.CName) == targetValue(b.CName)
 	case recordTypeMX:
-		return a.Name == b.Name && a.Pref == b.Pref
+		return mxValue(a) == mxValue(b)
 	case recordTypeNS:
-		return a.TargetName == b.TargetName
-	case recordTypeTXT:
-		return txtEqual(a.Text, b.Text)
-	case recordTypeSRV:
-		return a.Service == b.Service &&
-			a.Priority == b.Priority &&
-			a.Weight == b.Weight &&
-			a.Port == b.Port &&
-			a.Target == b.Target
-	case recordTypeCAA:
-		return a.Flag == b.Flag && a.Tag == b.Tag && a.Name == b.Name
-	default:
+		return targetValue(a.TargetName) == targetValue(b.TargetName)
+	case recordTypePTR:
+		return targetValue(a.Name) == targetValue(b.Name)
+	case recordTypeTXT, recordTypeTLSA:
 		return a.Text == b.Text
+	case recordTypeSRV:
+		return srvValue(a) == srvValue(b)
+	case recordTypeCAA:
+		return caaValue(a) == caaValue(b)
+	default:
+		panic("unvalidated record type")
 	}
 }
 
-// txtEqual compares two TXT record values accepting both quoted and unquoted
-// forms on either side. libdns stores TXT content unquoted; some APIs return
-// it wire-format quoted.
-func txtEqual(a, b string) bool {
-	return a == b || trimTXTQuotes(a) == trimTXTQuotes(b)
+func targetValue(target string) string {
+	if target == "." {
+		return target
+	}
+	return removeTrailingDot(target)
 }
 
-func trimTXTQuotes(s string) string {
-	s = strings.TrimSpace(s)
-	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
-		return s[1 : len(s)-1]
-	}
-	return s
+func mxValue(r *apiRecord) mxData {
+	return mxData{preference: r.Pref, target: targetValue(r.Name)}
+}
+
+type mxData struct {
+	preference uint16
+	target     string
+}
+
+func srvValue(r *apiRecord) srvData {
+	return srvData{priority: r.Priority, weight: r.Weight, port: r.Port, target: targetValue(r.Target)}
+}
+
+type srvData struct {
+	priority, weight, port uint16
+	target                 string
+}
+
+func caaValue(r *apiRecord) caaData {
+	return caaData{flag: r.flags, tag: r.Tag, value: r.Value}
+}
+
+type caaData struct {
+	flag       uint8
+	tag, value string
 }

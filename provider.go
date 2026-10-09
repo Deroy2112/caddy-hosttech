@@ -144,34 +144,35 @@ func (p *Provider) SetRecords(ctx context.Context, zone string, records []libdns
 // Hosttech's DELETE endpoint addresses records by numeric ID only, so we list
 // the zone once per call and issue one DELETE per matched record.
 func (p *Provider) DeleteRecords(ctx context.Context, zone string, records []libdns.Record) ([]libdns.Record, error) {
+	filters, err := prepareFilters(records)
+	if err != nil {
+		return nil, err
+	}
 	p.initClient()
 	zoneName := removeTrailingDot(zone)
-
 	zoneRecs, err := p.client.getRecords(ctx, zoneName)
 	if err != nil {
 		return nil, fmt.Errorf("listing zone records: %w", err)
 	}
-
 	var deleted []libdns.Record
-	consumed := make(map[int]bool, len(records))
-
-	for _, rec := range records {
-		want := rec.RR()
-		for _, apiRec := range zoneRecs {
-			if consumed[apiRec.ID] {
+	consumed := make(map[int]bool)
+	for i := range filters {
+		for j := range zoneRecs {
+			rec := &zoneRecs[j]
+			if consumed[rec.ID] || !matchesRR(rec, &filters[i]) {
 				continue
 			}
-			if !matchesRR(&apiRec, want) {
+			err := p.client.deleteRecord(ctx, zoneName, rec.ID)
+			consumed[rec.ID] = true
+			if missingRecord(err) {
 				continue
 			}
-			if err := p.client.deleteRecord(ctx, zoneName, apiRec.ID); err != nil {
-				return deleted, fmt.Errorf("deleting record %d (%s %s): %w", apiRec.ID, recordName(&apiRec), apiRec.Type, err)
+			if err != nil {
+				return deleted, fmt.Errorf("deleting record %d: %w", rec.ID, err)
 			}
-			consumed[apiRec.ID] = true
-			deleted = append(deleted, apiRec.toLibdns())
+			deleted = append(deleted, rec.toLibdns())
 		}
 	}
-
 	return deleted, nil
 }
 

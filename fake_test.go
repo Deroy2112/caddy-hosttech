@@ -64,6 +64,7 @@ type hosttechFake struct {
 	nextID   int
 	response func(int, fakeObject) fakeObject
 	calls    []fakeCall
+	before   func(*http.Request) int
 }
 
 func newHosttechFake(t *testing.T) *hosttechFake {
@@ -115,6 +116,12 @@ func (f *hosttechFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, fakeCall{method: r.Method, path: r.URL.RequestURI()})
+	if f.before != nil {
+		if status := f.before(r); status != 0 {
+			f.reply(w, status, fakeObject{"message": ""})
+			return
+		}
+	}
 	if r.Header.Get("Authorization") != "Bearer "+fakeToken {
 		f.reply(w, http.StatusUnauthorized, fakeObject{"message": "Unauthenticated."})
 		return
